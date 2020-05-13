@@ -4,52 +4,71 @@ import argparse
 import datetime
 
 
+def time_frame_definition():
+
+    # Any Useful Variables
+    utc_now = datetime.datetime.utcnow()
+
+    # Define dictionary
+    date_time_dict = {
+        'all time': lambda date: True,
+        'last week': lambda date: date > (utc_now - datetime.timedelta(days=7)),
+        'all weekdays': lambda date: date.isoweekday() in range(1, 6),
+        'all weekends': lambda date: date.isoweekday() in (0, 6)
+    }
+
+    return date_time_dict
+
+
 def write_betting_results_dict_to_database(session, results_dict):
     # Commit Results
-    for strategy, time_frames in results_dict.items():
-        for time_frame, bet_types in time_frames.items():
-            for bet_type, single_result_dict in bet_types.items():
+    for strategy, tracks in results_dict.items():
+        for track, time_frames in tracks.items():
+            for time_frame, bet_types in time_frames.items():
+                for bet_type, single_result_dict in bet_types.items():
 
-                # Calculate roi
-                if single_result_dict['bet_cost'] > 0:
-                    bet_roi = ((single_result_dict['bet_return'] / single_result_dict['bet_cost']) - 1.0) * 100.0
-                else:
-                    bet_roi = 0
+                    # Calculate roi
+                    if single_result_dict['bet_cost'] > 0:
+                        bet_roi = ((single_result_dict['bet_return'] / single_result_dict['bet_cost']) - 1.0) * 100.0
+                    else:
+                        bet_roi = 0
 
-                # Create item
-                item = dict()
-                item['strategy'] = strategy
-                item['bet_type_text'] = bet_type
-                item['time_frame_text'] = time_frame
-                item['bet_count'] = single_result_dict['bet_count']
-                item['bet_cost'] = single_result_dict['bet_cost']
-                item['bet_return'] = single_result_dict['bet_return']
-                item['bet_roi'] = bet_roi
-                item['bet_success_count'] = single_result_dict['bet_success_count']
-                item['update_time'] = single_result_dict['update_time']
+                    # Create item
+                    item = dict()
+                    item['strategy'] = strategy
+                    item['bet_type_text'] = bet_type
+                    item['time_frame_text'] = time_frame
+                    item['track_id'] = track
+                    item['bet_count'] = single_result_dict['bet_count']
+                    item['bet_cost'] = single_result_dict['bet_cost']
+                    item['bet_return'] = single_result_dict['bet_return']
+                    item['bet_roi'] = bet_roi
+                    item['bet_success_count'] = single_result_dict['bet_success_count']
+                    item['update_time'] = single_result_dict['update_time']
 
-                # Check for existing record
-                betting_result = session.query(BettingResults).filter(
-                    BettingResults.time_frame_text == item['time_frame_text'],
-                    BettingResults.bet_type_text == item['bet_type_text'],
-                    BettingResults.strategy == item['strategy']
-                ).first()
+                    # Check for existing record
+                    betting_result = session.query(BettingResults).filter(
+                        BettingResults.time_frame_text == item['time_frame_text'],
+                        BettingResults.track_id == item['track_id'],
+                        BettingResults.bet_type_text == item['bet_type_text'],
+                        BettingResults.strategy == item['strategy']
+                    ).first()
 
-                # New item logic
-                if betting_result is None:
+                    # New item logic
+                    if betting_result is None:
 
-                    # Process new item
-                    betting_result = BettingResults(**item)
+                        # Process new item
+                        betting_result = BettingResults(**item)
 
-                # Otherwise update existing item
-                else:
+                    # Otherwise update existing item
+                    else:
 
-                    # Set the new attributes
-                    for key, value in item.items():
-                        setattr(betting_result, key, value)
+                        # Set the new attributes
+                        for key, value in item.items():
+                            setattr(betting_result, key, value)
 
-                # Add to session
-                session.add(betting_result)
+                    # Add to session
+                    session.add(betting_result)
 
     # Commit session
     session.commit()
@@ -65,23 +84,25 @@ def straight_favorite_betting(session):
         'show',
         'wps'
     ]
-    time_frames = [
-        'last 24 hours',
-        'last week',
-        'all time'
-    ]
+    time_frames = time_frame_definition()
+    track_list = [track_id[0] for track_id in session.query(Races.track_id).distinct()]
+    track_list.append('all')
+
+    # Initialize Results Dictionary
     results_dict = dict()
     for strategy in strategies:
         results_dict[strategy] = dict()
-        for time_frame in time_frames:
-            results_dict[strategy][time_frame] = dict()
-            for bet_type in bet_types:
-                results_dict[strategy][time_frame][bet_type] = dict()
-                results_dict[strategy][time_frame][bet_type]['bet_count'] = 0
-                results_dict[strategy][time_frame][bet_type]['bet_cost'] = 0
-                results_dict[strategy][time_frame][bet_type]['bet_return'] = 0
-                results_dict[strategy][time_frame][bet_type]['bet_success_count'] = 0
-                results_dict[strategy][time_frame][bet_type]['update_time'] = time_now
+        for track in track_list:
+            results_dict[strategy][track] = dict()
+            for time_frame, time_frame_function in time_frames.items():
+                results_dict[strategy][track][time_frame] = dict()
+                for bet_type in bet_types:
+                    results_dict[strategy][track][time_frame][bet_type] = dict()
+                    results_dict[strategy][track][time_frame][bet_type]['bet_count'] = 0
+                    results_dict[strategy][track][time_frame][bet_type]['bet_cost'] = 0
+                    results_dict[strategy][track][time_frame][bet_type]['bet_return'] = 0
+                    results_dict[strategy][track][time_frame][bet_type]['bet_success_count'] = 0
+                    results_dict[strategy][track][time_frame][bet_type]['update_time'] = time_now
 
     # Get all races
     races = session.query(Races).filter_by(results=True).all()
@@ -119,44 +140,44 @@ def straight_favorite_betting(session):
                 print(f'Why is the win entry pool None for {entry.entry_id}?')
 
         # Process Winners
-        for strategy in strategies:
-            if favorite_entry is not None:
+        if favorite_entry is not None:
 
-                # Loop through time frames
-                for time_frame in time_frames:
+            # Strategy Loop
+            for strategy in strategies:
 
-                    # Time Logic
-                    if time_frame == 'last 24 hours':
-                        if race.post_time < (time_now - datetime.timedelta(days=1)):
+                for track in ['all', race.track_id]:
+
+                    # Loop through time frames
+                    for time_frame, time_frame_function in time_frames.items():
+
+                        # Time Logic
+                        if not time_frame_function(race.post_time):
                             continue
-                    elif time_frame == 'last week':
-                        if race.post_time < (time_now - datetime.timedelta(days=7)):
-                            continue
 
-                    # Loop through bet types
-                    for bet_type in bet_types:
+                        # Loop through bet types
+                        for bet_type in bet_types:
 
-                        if bet_type == 'win':
-                            win_amount = favorite_entry.win_payoff
-                            bet_cost = 2
-                        elif bet_type == 'place':
-                            win_amount = favorite_entry.place_payoff
-                            bet_cost = 2
-                        elif bet_type == 'show':
-                            win_amount = favorite_entry.show_payoff
-                            bet_cost = 2
-                        elif bet_type == 'wps':
-                            win_amount = favorite_entry.win_payoff + \
-                                         favorite_entry.place_payoff + \
-                                         favorite_entry.show_payoff
-                            bet_cost = 6
+                            if bet_type == 'win':
+                                win_amount = favorite_entry.win_payoff
+                                bet_cost = 2
+                            elif bet_type == 'place':
+                                win_amount = favorite_entry.place_payoff
+                                bet_cost = 2
+                            elif bet_type == 'show':
+                                win_amount = favorite_entry.show_payoff
+                                bet_cost = 2
+                            elif bet_type == 'wps':
+                                win_amount = favorite_entry.win_payoff + \
+                                             favorite_entry.place_payoff + \
+                                             favorite_entry.show_payoff
+                                bet_cost = 6
 
-                        # Store Results
-                        results_dict[strategy][time_frame][bet_type]['bet_count'] += 1
-                        results_dict[strategy][time_frame][bet_type]['bet_cost'] += bet_cost
-                        results_dict[strategy][time_frame][bet_type]['bet_return'] += win_amount
-                        if win_amount > 0:
-                            results_dict[strategy][time_frame][bet_type]['bet_success_count'] += 1
+                            # Store Results
+                            results_dict[strategy][track][time_frame][bet_type]['bet_count'] += 1
+                            results_dict[strategy][track][time_frame][bet_type]['bet_cost'] += bet_cost
+                            results_dict[strategy][track][time_frame][bet_type]['bet_return'] += win_amount
+                            if win_amount > 0:
+                                results_dict[strategy][track][time_frame][bet_type]['bet_success_count'] += 1
 
     # Write the dictionary to the database
     write_betting_results_dict_to_database(session, results_dict)
@@ -334,7 +355,7 @@ if __name__ == '__main__':
 
         # Analysis to perform
         straight_favorite_betting(db_session)
-        whole_window_favorite_betting(db_session)
+        #whole_window_favorite_betting(db_session)
 
         # Close everything out
         db_session.close()

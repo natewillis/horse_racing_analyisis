@@ -1,26 +1,49 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Float, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Boolean, Date
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.engine.url import URL
-from settings import DATABASE
-from pytz import timezone
 
 # Setup base
 base = declarative_base()
 
 
-def db_connect():
-    """
-    Performs database connection using database settings from settings.py.
-    Returns sqlalchemy engine instance
-    """
-    return create_engine(URL(**DATABASE))
+class Tracks(base):
+    """Sqlalchemy Races model"""
+    __tablename__ = "tracks"
+
+    track_id = Column(Integer, primary_key=True)
+    code = Column('code', String)
+    name = Column('name', String)
+    time_zone = Column('time_zone', String)
+    country = Column('country', String)
 
 
-def create_drf_live_table(engine, destroy_flag):
-    """"""
-    if destroy_flag:
-        base.metadata.drop_all(bind=engine)
-    base.metadata.create_all(engine)
+class Jockeys(base):
+    """Sqlalchemy Jockey model"""
+    __tablename__ = "jockeys"
+    jockey_id = Column('jockey_id', Integer, primary_key=True)
+    first_name = Column('first_name', String)
+    last_name = Column('last_name', String)
+    drf_jockey_id = Column('drf_jockey_id', Integer)
+    drf_jockey_type = Column('drf_jockey_type', String)
+    alias = Column('alias', String)
+
+
+class Trainers(base):
+    """Sqlalchemy Jockey model"""
+    __tablename__ = "trainers"
+    trainer_id = Column('trainer_id', Integer, primary_key=True)
+    first_name = Column('first_name', String)
+    last_name = Column('last_name', String)
+    drf_trainer_id = Column('drf_trainer_id', Integer)
+    drf_trainer_type = Column('drf_trainer_type', String)
+    alias = Column('alias', String)
+
+
+class Owners(base):
+    """Sqlalchemy Jockey model"""
+    __tablename__ = "owners"
+    owner_id = Column('owner_id', Integer, primary_key=True)
+    first_name = Column('first_name', String)
+    last_name = Column('last_name', String)
 
 
 class Races(base):
@@ -30,13 +53,14 @@ class Races(base):
     race_id = Column(Integer, primary_key=True)
 
     # Identifying Info
-    track_id = Column('track_id', String)
+    track_id = Column('track_id', Integer, ForeignKey('tracks.track_id'))
     race_number = Column('race_number', Integer)
-    post_time = Column('post_time', DateTime)  # UTC
+    card_date = Column('card_date', Date)
     day_evening = Column('day_evening', String)
     country = Column('country', String)
 
     # Race Info
+    post_time = Column('post_time', DateTime)  # UTC
     distance = Column('distance', Float)  # In furlongs
     purse = Column('purse', Integer, nullable=True)
     age_restriction = Column('age_restriction', String, nullable=True)
@@ -47,29 +71,20 @@ class Races(base):
     race_type = Column('race_type', String, nullable=True)
     breed = Column('breed', String, nullable=True)
     track_condition = Column('track_condition', String, nullable=True)
+    min_claim_price = Column('min_claim_price', Float)
+    max_claim_price = Column('max_claim_price', Float)
+    race_class = Column('race_class', String)
 
-    # Results
-    results = Column('results', Boolean, default=False)
+    # Inferred Data
+    off_time = Column('off_time', DateTime)
+
+    # Types of Parsing
+    drf_results = Column('drf_results', Boolean, default=False)
+    drf_live_odds = Column('drf_live_odds', Boolean, default=False)
+    drf_entries = Column('drf_entries', Boolean, default=False)
 
     # Scraping Info
     latest_scrape_time = Column('latest_scrape_time', DateTime)  # UTC
-
-    def live_odds_link(self):
-        utc_datetime = self.post_time.replace(tzinfo=timezone('UTC'))
-        eastern_datetime = utc_datetime.astimezone(timezone('US/Eastern'))
-        return (f'http://www.drf.com/liveOdds/tracksPoolDetails'
-                f'/currentRace/{self.race_number}'
-                f'/trackId/{self.track_id}' 
-                f'/country/{self.country}'
-                f'/dayEvening/{self.day_evening}'
-                f'/date/{eastern_datetime.strftime("%m-%d-%Y")}')
-
-    def results_link(self):
-        utc_datetime = self.post_time.replace(tzinfo=timezone('UTC'))
-        eastern_datetime = utc_datetime.astimezone(timezone('US/Eastern'))
-        return("https://www.drf.com/results/resultDetails/id/" +
-               self.track_id + "/country/" + self.country +
-               "/date/" + eastern_datetime.strftime("%m-%d-%Y"))
 
 
 class Horses(base):
@@ -93,6 +108,9 @@ class Entries(base):
     scratch_indicator = Column('scratch_indicator', String)
     post_position = Column('post_position', Integer, nullable=True)
     program_number = Column('program_number', String, nullable=True)
+    trainer_id = Column('trainer_id', Integer, ForeignKey('trainers.trainer_id'))
+    jockey_id = Column('jockey_id', Integer, ForeignKey('jockeys.jockey_id'))
+    owner_id = Column('owner_id', Integer, ForeignKey('owners.owner_id'))
 
     # Results
     win_payoff = Column('win_payoff', Float, default=0)
@@ -143,12 +161,26 @@ class Probables(base):
     probable_pool_amount = Column('probable_pool_amount', Float)
 
 
+class Picks(base):
+    __tablename__ = "picks"
+    pick_id = Column('pick_id', Integer, primary_key=True)
+    bettor_family = Column('bettor_family', String)
+    bettor_name = Column('bettor_name', String)
+    race_id = Column('race_id', Integer, ForeignKey('races.race_id'))  # The race the ticket would collect (last race)
+    bet_type = Column('bet_type', String)
+    bet_cost = Column('bet_cost', Float)
+    bet_return = Column('bet_return', Float, default=0)
+    bet_win_text = Column('bet_win_text', String)
+    bet_origin_date = Column('bet_origin_date', DateTime)
+
+
 class BettingResults(base):
     """Sqlalchemy Races model"""
     __tablename__ = "betting_results"
 
     betting_result_id = Column('betting_result_id', Integer, primary_key=True)
     strategy = Column('strategy', String)
+    track_id = Column('track_id', String)
     bet_type_text = Column('bet_type_text', String)
     time_frame_text = Column('time_frame_text', String)
     bet_count = Column('bet_count', Integer)
