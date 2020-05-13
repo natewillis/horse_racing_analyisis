@@ -1,4 +1,5 @@
-from models import db_connect, Races, BettingResults, Entries, EntryPools, create_drf_live_table
+from models import Races, BettingResults, Entries, EntryPools, Picks
+from db_utils import get_db_session, shutdown_session_and_engine
 from sqlalchemy.orm import sessionmaker
 import argparse
 import datetime
@@ -332,6 +333,62 @@ def whole_window_favorite_betting(session):
     write_betting_results_dict_to_database(session, results_dict)
 
 
+def create_payoff_dictionary(session, race):
+
+    # Entries in order of finish
+    entries = session.query(Entries).filter(
+        Entries.race_id == race.race_id
+    ).order_by(Entries.finish_position).all()
+
+    # Init dictionary
+    payoffs = []
+
+    # Win Processing
+    if len(entries) > 0:
+        if entries[0].win_payoff > 0:
+            win_dict = {
+                'bet_type': 'WIN',
+                'bet_win_text': str(entries[0].program_number),
+                'bet_return': entries[0].win_payoff,
+                'bet_cost': 2
+            }
+            payoffs.append(win_dict)
+
+    # Return Finished Dictionary
+    return payoffs
+
+
+def evaluate_picks(session):
+
+    # Find picks that can be evaluated
+    picks = session.query(Picks).join(Races).filter(
+        Races.drf_results,
+        Picks.bet_return == None
+    ).all()
+
+    for pick in picks:
+
+        # Get Race
+        race = session.query(Races).filter(Races.race_id == pick.race_id).first()
+
+        # Get Race Payoffs
+        payoffs = create_payoff_dictionary(session, race)
+
+        # Check if this pick hits any of the payoffs
+        pick.bet_return = 0
+        for payoff in payoffs:
+            if payoff['bet_type'] == pick.bet_type and payoff['bet_win_text'] == pick.bet_win_text:
+
+                # Figure out what our bet was for
+                cost_fraction = pick.bet_cost/payoff['bet_cost']
+
+                # Figure out winnings
+                pick.bet_return = round(cost_fraction * payoff['bet_return'], 2)
+
+        # Commit update
+        session.commit()
+
+
 if __name__ == '__main__':
 
     # Argument Parsing
@@ -344,24 +401,44 @@ if __name__ == '__main__':
                             )
     args = arg_parser.parse_args()
 
+    # Setup mode tracker
+    modes_run = []
+
     # Check mode
     if args.mode in ('all'):
 
+        # Mode Tracking
+        modes_run.append('favorites')
+
         # Connect to the database
-        engine = db_connect()
-        create_drf_live_table(engine, False)
-        session_maker_class = sessionmaker(bind=engine)
-        db_session = session_maker_class()
+        db_session = get_db_session()
 
         # Analysis to perform
         straight_favorite_betting(db_session)
         #whole_window_favorite_betting(db_session)
 
         # Close everything out
-        db_session.close()
-        engine.dispose()
+        shutdown_session_and_engine(db_session)
 
-    else:
+    if args.mode in ('all', 'evaluate'):
+
+        # Mode Tracking
+        modes_run.append('evaluate')
+
+        # Connect to the database
+        db_session = get_db_session()
+
+        # Evaluate picks
+        evaluate_picks(db_session)
+
+        # Close everything out
+        shutdown_session_and_engine(db_session)
+
+    if len(modes_run) == 0:
 
         print(f'"{args.mode}" is not a valid operational mode!')
         exit(1)
+
+    else:
+
+        print(f'We ran the following modes successfully: {",".join(modes_run)}')
