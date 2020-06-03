@@ -126,6 +126,5 @@ def run_monte_carlo_arima_on_race(race, session):
 
     # Create or update
     for analysis_probability_item in winner_probability_items:
-        print(analysis_probability_item)
         analysis_probability = load_item_into_database(analysis_probability_item, 'analysis_probability', session)
 
