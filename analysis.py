@@ -1,6 +1,6 @@
-from models import Races, BettingResults, Entries, EntryPools, Picks
-from db_utils import get_db_session, shutdown_session_and_engine
-from sqlalchemy.orm import sessionmaker
+from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities
+from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
+from arima import run_monte_carlo_arima_on_race
 import argparse
 import datetime
 
@@ -47,32 +47,8 @@ def write_betting_results_dict_to_database(session, results_dict):
                     item['bet_success_count'] = single_result_dict['bet_success_count']
                     item['update_time'] = single_result_dict['update_time']
 
-                    # Check for existing record
-                    betting_result = session.query(BettingResults).filter(
-                        BettingResults.time_frame_text == item['time_frame_text'],
-                        BettingResults.track_id == item['track_id'],
-                        BettingResults.bet_type_text == item['bet_type_text'],
-                        BettingResults.strategy == item['strategy']
-                    ).first()
-
-                    # New item logic
-                    if betting_result is None:
-
-                        # Process new item
-                        betting_result = BettingResults(**item)
-
-                    # Otherwise update existing item
-                    else:
-
-                        # Set the new attributes
-                        for key, value in item.items():
-                            setattr(betting_result, key, value)
-
-                    # Add to session
-                    session.add(betting_result)
-
-    # Commit session
-    session.commit()
+                    # Create or update
+                    betting_result = load_item_into_database(item, 'betting_result', session)
 
 
 def straight_favorite_betting(session):
@@ -375,18 +351,39 @@ def evaluate_picks(session):
         payoffs = create_payoff_dictionary(session, race)
 
         # Check if this pick hits any of the payoffs
-        pick.bet_return = 0
-        for payoff in payoffs:
-            if payoff['bet_type'] == pick.bet_type and payoff['bet_win_text'] == pick.bet_win_text:
+        if len(payoffs) > 0:
+            pick.bet_return = 0
+            for payoff in payoffs:
+                if payoff['bet_type'] == pick.bet_type and payoff['bet_win_text'] == pick.bet_win_text:
 
-                # Figure out what our bet was for
-                cost_fraction = pick.bet_cost/payoff['bet_cost']
+                    # Figure out what our bet was for
+                    cost_fraction = pick.bet_cost/payoff['bet_cost']
 
-                # Figure out winnings
-                pick.bet_return = round(cost_fraction * payoff['bet_return'], 2)
+                    # Figure out winnings
+                    pick.bet_return = round(cost_fraction * payoff['bet_return'], 2)
 
-        # Commit update
-        session.commit()
+    # Commit update
+    session.commit()
+
+
+def run_arima(session):
+
+    # Get races with history
+    races = session.query(Races).filter(
+        Races.equibase_horse_results == True,
+        Races.drf_entries == True
+    ).order_by(Races.card_date.desc()).all()
+
+    # Loop to figure out if analyis is needed
+    for race in races:
+
+        # Check if we have an analysis value
+        analysis_probability = session.query(AnalysisProbabilities).join(Entries).filter(
+            Entries.race_id == race.race_id
+        ).first()
+
+        if analysis_probability is None:
+            run_monte_carlo_arima_on_race(race, session)
 
 
 if __name__ == '__main__':
@@ -405,7 +402,7 @@ if __name__ == '__main__':
     modes_run = []
 
     # Check mode
-    if args.mode in ('all'):
+    if args.mode in ('favorite_betting', 'all'):
 
         # Mode Tracking
         modes_run.append('favorites')
@@ -430,6 +427,20 @@ if __name__ == '__main__':
 
         # Evaluate picks
         evaluate_picks(db_session)
+
+        # Close everything out
+        shutdown_session_and_engine(db_session)
+
+    if args.mode in ('all', 'run_arima', 'analysis_probabilities'):
+
+        # Mode Tracking
+        modes_run.append('run_arima')
+
+        # Connect to the database
+        db_session = get_db_session()
+
+        # Evaluate picks
+        run_arima(db_session)
 
         # Close everything out
         shutdown_session_and_engine(db_session)

@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from settings import DATABASE
 from sqlalchemy.ext.declarative import declarative_base
 from models import Races, Horses, Entries, EntryPools, Payoffs, Probables, Tracks, Jockeys, Owners, Trainers, \
-    Picks, BettingResults, base
+    Picks, BettingResults, Workouts, base, AnalysisProbabilities
 from sqlalchemy import func
 
 
@@ -67,17 +67,29 @@ def find_race_instance_from_item(item, session):
 
 
 def find_jockey_instance_from_item(item, session):
-    return session.query(Jockeys).filter(
-        Jockeys.first_name == item['first_name'],
-        Jockeys.last_name == item['last_name']
-    ).first()
+    if len(item['first_name']) == 1:
+        return session.query(Jockeys).filter(
+            Jockeys.first_name.startswith(item['first_name']),
+            Jockeys.last_name == item['last_name']
+        ).first()
+    else:
+        return session.query(Jockeys).filter(
+            Jockeys.first_name == item['first_name'],
+            Jockeys.last_name == item['last_name']
+        ).first()
 
 
 def find_trainer_instance_from_item(item, session):
-    return session.query(Trainers).filter(
-        Trainers.first_name == item['first_name'],
-        Trainers.last_name == item['last_name']
-    ).first()
+    if len(item['first_name']) == 1:
+        return session.query(Trainers).filter(
+            Trainers.first_name.startswith(item['first_name']),
+            Trainers.last_name == item['last_name']
+        ).first()
+    else:
+        return session.query(Trainers).filter(
+            Trainers.first_name == item['first_name'],
+            Trainers.last_name == item['last_name']
+        ).first()
 
 
 def find_horse_instance_from_item(item, session):
@@ -134,6 +146,31 @@ def find_pick_instance_from_item(item, session):
     ).first()
 
 
+def find_workout_instance_from_item(item, session):
+    return session.query(Workouts).filter(
+        Workouts.horse_id == item['horse_id'],
+        Workouts.workout_date == item['workout_date'],
+        Workouts.track_id == item['track_id'],
+    ).first()
+
+
+def find_analysis_probability_instance_from_item(item, session):
+    return session.query(AnalysisProbabilities).filter(
+        AnalysisProbabilities.entry_id == item['entry_id'],
+        AnalysisProbabilities.analysis_type == item['analysis_type'],
+        AnalysisProbabilities.finish_place == item['finish_place'],
+    ).first()
+
+
+def find_betting_result_instance_from_item(item, session):
+    return session.query(BettingResults).filter(
+        BettingResults.time_frame_text == item['time_frame_text'],
+        BettingResults.track_id == item['track_id'],
+        BettingResults.bet_type_text == item['bet_type_text'],
+        BettingResults.strategy == item['strategy']
+    ).first()
+
+
 def find_instance_from_item(item, item_type, session):
 
     # Instance Finder Dict
@@ -148,7 +185,10 @@ def find_instance_from_item(item, item_type, session):
         'entry_pool': find_entry_pool_instance_from_item,
         'payoff': find_payoff_instance_from_item,
         'probable': find_probable_instance_from_item,
-        'pick': find_pick_instance_from_item
+        'pick': find_pick_instance_from_item,
+        'workout': find_workout_instance_from_item,
+        'betting_result': find_betting_result_instance_from_item,
+        'analysis_probability': find_analysis_probability_instance_from_item,
     }
 
     # Return instance
@@ -169,7 +209,10 @@ def create_new_instance_from_item(item, item_type, session):
         'entry_pool': EntryPools,
         'payoff': Payoffs,
         'probable': Probables,
-        'pick': Picks
+        'pick': Picks,
+        'workout': Workouts,
+        'analysis_probability': AnalysisProbabilities,
+        'betting_result': BettingResults
     }
 
     # Create Instance
