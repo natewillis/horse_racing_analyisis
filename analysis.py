@@ -480,7 +480,7 @@ if __name__ == '__main__':
         db_session = get_db_session()
 
         # Evaluate picks
-        run_arima(db_session)
+        run_random_forest(db_session)
 
         # Close everything out
         shutdown_session_and_engine(db_session)
