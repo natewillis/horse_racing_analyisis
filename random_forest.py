@@ -7,6 +7,7 @@ from models import Entries, Horses, Races
 from db_utils import get_db_session, shutdown_session_and_engine
 from probabilities import get_win_probabilities_from_monte_carlo_matrix
 from db_utils import load_item_into_database
+import os
 
 
 def get_speed_figure_series_from_entry(entry, session):
@@ -107,9 +108,11 @@ def get_random_forest_data(session):
     df.to_csv('temp.csv')
 
 
-def train_random_forest():
+def train_random_forest(session):
 
     # Get CSV training data
+    if not os.path.exists('temp.csv'):
+        get_random_forest_data(session)
     features = pd.read_csv('temp.csv')
     features = features.drop(features.columns[0], axis=1)
 

@@ -1,10 +1,12 @@
-from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities
+from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities, Tracks
 from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
 from arima import run_monte_carlo_arima_on_race
-from random_forest import run_monte_carlo_random_forest_on_race
+from random_forest import run_monte_carlo_random_forest_on_race, train_random_forest
 import argparse
 import datetime
 from joblib import load
+import os
+
 
 def time_frame_definition():
 
@@ -391,6 +393,8 @@ def run_arima(session):
 def run_random_forest(session):
 
     # Load Model
+    if not os.path.exists('forest_model.joblib'):
+        train_random_forest(session)
     rf_model = load('forest_model.joblib')
 
     # Get races with history
@@ -410,6 +414,124 @@ def run_random_forest(session):
 
         if analysis_probability is None:
             run_monte_carlo_random_forest_on_race(race, session, rf_model)
+
+
+def bet_on_analysis_probabilities(session):
+
+    # Delete Analysis Probability bets
+    session.query(Picks).filter(Picks.bettor_family == 'let it ride').\
+        filter(Picks.bettor_name.contains('probabilities')).\
+        delete(synchronize_session='fetch')
+    session.commit()
+
+    # Get races with probabilties and offtimes
+    races = session.query(Races).join(Entries).join(AnalysisProbabilities).filter(
+        Races.off_time.isnot(None)
+    ).distinct()
+
+    # Iterate the race
+    for race in races:
+
+        entries = session.query(Entries).filter(
+            Entries.race_id == race.race_id,
+            Entries.scratch_indicator == 'N'
+        ).all()
+
+        for entry in entries:
+
+            # Win Overlay Calculations
+            win_odds = session.query(EntryPools.odds).filter(
+                EntryPools.entry_id == entry.entry_id,
+                EntryPools.scrape_time < race.off_time,
+            ).order_by(EntryPools.scrape_time.desc()).first()
+
+            if win_odds:
+                win_odds = win_odds[0]
+                if win_odds:
+                    if win_odds > 0:
+                        win_odds_probability = 1/(win_odds+1)
+
+                        analysis_probabilities = session.query(AnalysisProbabilities).filter(
+                            AnalysisProbabilities.entry_id == entry.entry_id,
+                            AnalysisProbabilities.finish_place == 1
+                        )
+
+                        for analysis_probability in analysis_probabilities:
+                            if win_odds_probability > .1 and analysis_probability.probability_percentage > .1:
+                                overlay = analysis_probability.probability_percentage/win_odds_probability
+
+                                if overlay > 1.1:
+                                    # Bet it!
+                                    item = {
+                                        'bettor_family': 'let it ride',
+                                        'bettor_name': f'{analysis_probability.analysis_type} - probabilities - overlay > 1.1',
+                                        'race_id': race.race_id,
+                                        'bet_type': 'WIN',
+                                        'bet_cost': 2,
+                                        'bet_win_text': entry.program_number.strip(),
+                                        'bet_origin_date': datetime.datetime.utcnow(),
+                                        'bet_return': None
+                                    }
+
+                                    pick_item = load_item_into_database(item, 'pick', session)
+
+
+def pick_strategy_evaluation(session):
+
+    # Setup variables
+    time_now = datetime.datetime.utcnow()
+    time_frames = time_frame_definition()
+    track_list = [track_id[0] for track_id in session.query(Races.track_id).distinct()]
+    track_list.append('all')
+    item_list = []
+
+    # Delete existing
+    session.query(BettingResults).delete()
+    session.commit()
+
+    # Get Pick Information
+    join_query = session.query(Picks, Races, Tracks).filter(
+        Picks.bet_return.isnot(None),
+        Races.race_id == Picks.race_id,
+        Races.track_id == Tracks.track_id
+    ).all()
+
+    # Start looping
+    for pick, race, track in join_query:
+        strategy = f'{pick.bettor_family} - {pick.bettor_name}'
+        for time_frame in time_frames.keys():
+            if time_frames[time_frame](datetime.datetime(race.card_date.year, race.card_date.month, race.card_date.day)):
+                for track_code in [track.name, 'ALL TRACKS']:
+                    item = {
+                        'strategy': strategy,
+                        'track_id': track_code,
+                        'bet_type_text': pick.bet_type,
+                        'time_frame_text': time_frame,
+                        'bet_count': 1,
+                        'bet_cost': pick.bet_cost,
+                        'bet_return': pick.bet_return,
+                        'bet_roi': pick.bet_return/pick.bet_cost,
+                        'bet_success_count': 1 if pick.bet_return > 0 else 0
+                    }
+
+                    found_item = False
+                    for existing_item in item_list:
+                        if item['strategy'] == existing_item['strategy'] and \
+                                item['track_id'] == existing_item['track_id'] and \
+                                item['bet_type_text'] == existing_item['bet_type_text'] and \
+                                item['time_frame_text'] == existing_item['time_frame_text']:
+                            existing_item['bet_count'] += item['bet_count']
+                            existing_item['bet_cost'] += item['bet_cost']
+                            existing_item['bet_return'] += item['bet_return']
+                            existing_item['bet_success_count'] += item['bet_success_count']
+                            existing_item['bet_roi'] = existing_item['bet_return'] / existing_item['bet_cost']
+                            found_item = True
+                    if not found_item:
+                        item_list.append(item)
+
+    # Load items to database
+    for item in item_list:
+        bet_result_item = load_item_into_database(item, 'betting_result', session)
 
 
 if __name__ == '__main__':
@@ -453,6 +575,7 @@ if __name__ == '__main__':
 
         # Evaluate picks
         evaluate_picks(db_session)
+        pick_strategy_evaluation(db_session)
 
         # Close everything out
         shutdown_session_and_engine(db_session)
@@ -481,6 +604,20 @@ if __name__ == '__main__':
 
         # Evaluate picks
         run_random_forest(db_session)
+
+        # Close everything out
+        shutdown_session_and_engine(db_session)
+
+    if args.mode in ('all', 'analysis_probability_bets'):
+
+        # Mode Tracking
+        modes_run.append('analysis_probability_bets')
+
+        # Connect to the database
+        db_session = get_db_session()
+
+        # Evaluate picks
+        bet_on_analysis_probabilities(db_session)
 
         # Close everything out
         shutdown_session_and_engine(db_session)
