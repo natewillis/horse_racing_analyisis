@@ -143,3 +143,4 @@ cython_debug/
 settings.py
 
 temp.csv
+*.joblib

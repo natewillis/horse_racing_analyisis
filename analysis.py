@@ -1,9 +1,10 @@
 from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities
 from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
 from arima import run_monte_carlo_arima_on_race
+from random_forest import run_monte_carlo_random_forest_on_race
 import argparse
 import datetime
-
+from joblib import load
 
 def time_frame_definition():
 
@@ -379,11 +380,36 @@ def run_arima(session):
 
         # Check if we have an analysis value
         analysis_probability = session.query(AnalysisProbabilities).join(Entries).filter(
-            Entries.race_id == race.race_id
+            Entries.race_id == race.race_id,
+            AnalysisProbabilities.analysis_type == 'arima_stdev_backup'
         ).first()
 
         if analysis_probability is None:
             run_monte_carlo_arima_on_race(race, session)
+
+
+def run_random_forest(session):
+
+    # Load Model
+    rf_model = load('forest_model.joblib')
+
+    # Get races with history
+    races = session.query(Races).filter(
+        Races.equibase_horse_results == True,
+        Races.drf_entries == True
+    ).order_by(Races.card_date.desc()).all()
+
+    # Loop to figure out if analyis is needed
+    for race in races:
+
+        # Check if we have an analysis value
+        analysis_probability = session.query(AnalysisProbabilities).join(Entries).filter(
+            Entries.race_id == race.race_id,
+            AnalysisProbabilities.analysis_type == 'random_forest_4_hist'
+        ).first()
+
+        if analysis_probability is None:
+            run_monte_carlo_random_forest_on_race(race, session, rf_model)
 
 
 if __name__ == '__main__':
@@ -435,6 +461,20 @@ if __name__ == '__main__':
 
         # Mode Tracking
         modes_run.append('run_arima')
+
+        # Connect to the database
+        db_session = get_db_session()
+
+        # Evaluate picks
+        run_arima(db_session)
+
+        # Close everything out
+        shutdown_session_and_engine(db_session)
+
+    if args.mode in ('all', 'run_random_forest', 'analysis_probabilities'):
+
+        # Mode Tracking
+        modes_run.append('run_random_forest')
 
         # Connect to the database
         db_session = get_db_session()
