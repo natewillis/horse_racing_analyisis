@@ -1,7 +1,7 @@
 from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities, Tracks
 from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
 from arima import run_monte_carlo_arima_on_race
-from random_forest import run_monte_carlo_random_forest_on_race, train_random_forest
+from random_forest import run_monte_carlo_random_forest_on_race, train_speed_figure_random_forest
 import argparse
 import datetime
 from joblib import load
@@ -17,6 +17,7 @@ def time_frame_definition():
     date_time_dict = {
         'all time': lambda date: True,
         'last week': lambda date: date > (utc_now - datetime.timedelta(days=7)),
+        'last 30 days': lambda date: date > (utc_now - datetime.timedelta(days=30)),
         'all weekdays': lambda date: date.isoweekday() in range(1, 6),
         'all weekends': lambda date: date.isoweekday() in (0, 6)
     }
@@ -394,7 +395,7 @@ def run_random_forest(session):
 
     # Load Model
     if not os.path.exists('forest_model.joblib'):
-        train_random_forest(session)
+        train_speed_figure_random_forest(session)
     rf_model = load('forest_model.joblib')
 
     # Get races with history

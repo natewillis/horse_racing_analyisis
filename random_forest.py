@@ -3,11 +3,12 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from joblib import dump, load
-from models import Entries, Horses, Races
+from models import Entries, Horses, Races, Workouts
 from db_utils import get_db_session, shutdown_session_and_engine
 from probabilities import get_win_probabilities_from_monte_carlo_matrix
 from db_utils import load_item_into_database
 import os
+import datetime
 
 
 def get_speed_figure_series_from_entry(entry, session):
@@ -61,20 +62,26 @@ def predicted_outcomes_from_entry_random_forest(entry, session, model):
     return predictions
 
 
-def get_random_forest_data(session):
+def get_speed_figure_random_forest_data(session):
 
     # Create dataframe
     df = pd.DataFrame(columns=[
-        'speed_n_m_4',
+        'horse_age',
+        'days_to_race_n_m_3',
         'speed_n_m_3',
+        'days_to_race_n_m_2',
         'speed_n_m_2',
+        'days_to_race_n_m_1',
         'speed_n_m_1',
         'speed_n'
     ])
     df_max = 0
 
     # Get Entries
-    horses = session.query(Horses).filter(Horses.equibase_horse_detail_scrape_date.isnot(None)).all()
+    horses = session.query(Horses).filter(
+        Horses.equibase_horse_detail_scrape_date.isnot(None),
+        Horses.horse_birthday.isnot(None)
+    ).all()
     horse_count = 1
 
     # Loop through horses
@@ -84,22 +91,35 @@ def get_random_forest_data(session):
         horse_count += 1
 
         # Get Entries
-        entries = session.query(Entries).join(Races).filter(
+        entry_query = session.query(Entries, Races).filter(
+            Entries.race_id == Races.race_id,
             Entries.equibase_speed_figure.isnot(None),
             Entries.equibase_speed_figure < 999,
-            Entries.horse_id == horse.horse_id
+            Entries.horse_id == horse.horse_id,
+            Races.card_date < (datetime.date.today() - datetime.timedelta(days=7))
         ).order_by(Races.card_date).all()
+
+        # Unpack the query in a way we can deal with it
+        entries = []
+        races = []
+        for entry, race in entry_query:
+            entries.append(entry)
+            races.append(race)
 
         # Ensure we have enough entries
         if len(entries) < 5:
+            print(f'not processing any of the {len(entries)} past performances for {horse.horse_name}')
             continue
 
         # Assemble sliding dataframe
         for i in range(4, len(entries)):
             df.loc[df_max] = [
-                entries[i-4].equibase_speed_figure,
+                (races[i].card_date - horse.horse_birthday).days,
+                (races[i].card_date - races[i-3].card_date).days,
                 entries[i-3].equibase_speed_figure,
+                (races[i].card_date - races[i - 2].card_date).days,
                 entries[i-2].equibase_speed_figure,
+                (races[i].card_date - races[i - 1].card_date).days,
                 entries[i-1].equibase_speed_figure,
                 entries[i].equibase_speed_figure
             ]
@@ -108,11 +128,11 @@ def get_random_forest_data(session):
     df.to_csv('temp.csv')
 
 
-def train_random_forest(session):
+def train_speed_figure_random_forest(session):
 
     # Get CSV training data
     if not os.path.exists('temp.csv'):
-        get_random_forest_data(session)
+        get_speed_figure_random_forest_data(session)
     features = pd.read_csv('temp.csv')
     features = features.drop(features.columns[0], axis=1)
 
@@ -222,7 +242,7 @@ def run_monte_carlo_random_forest_on_race(race, session, model):
 
     # Something didn't return a distribution so we can't analyze this race
     if not full_boat_flag:
-        print(f'race {race.race_id} cant be analyzed')
+        print(f'race {race.race_id} cant be analyzed - random_forest')
         return
 
     # Get winner probabilities
@@ -241,10 +261,6 @@ if __name__ == '__main__':
 
     db_session = get_db_session()
 
-    # Get Sample Race To Run
-    current_race = db_session.query(Races).filter(Races.race_id == 46557).first()
-
-    rf_model = load('forest_model.joblib')
-    run_monte_carlo_random_forest_on_race(current_race, db_session, rf_model)
+    train_speed_figure_random_forest(db_session)
 
     shutdown_session_and_engine(db_session)

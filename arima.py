@@ -114,7 +114,7 @@ def run_monte_carlo_arima_on_race(race, session):
 
     # Something didn't return a distribution so we can't analyze this race
     if not full_boat_flag:
-        print(f'race {race.race_id} cant be analyzed')
+        print(f'race {race.race_id} cant be analyzed 0 - arima')
         return
 
     # Get winner probabilities
