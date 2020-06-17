@@ -1,6 +1,6 @@
 from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
 from models import Entries, Races
-from probabilities import get_win_probabilities_from_monte_carlo_matrix
+from probabilities import get_win_probabilities_from_monte_carlo_speed_figure_matrix
 from statsmodels.tsa.arima_model import ARIMA
 import pandas as pd
 import numpy as np
@@ -78,6 +78,23 @@ def normal_dist_from_entry_arima(entry, session):
     return mu, scale
 
 
+def generate_single_entry_monte_carlo_speed_figures_from_arima(entry, session, model_dict):
+
+    # Generate mu, scale
+    mu, scale = normal_dist_from_entry_arima(entry, session)
+
+    # Check for None
+    if mu is None or scale is None:
+        return None
+
+    # Generate speed figures
+    speed_figures = np.random.default_rng().normal(mu, scale, model_dict['number_of_speed_figures'])
+
+    # Return speed figures
+    return speed_figures
+
+
+
 def run_monte_carlo_arima_on_race(race, session):
 
     # Parameters
@@ -118,7 +135,7 @@ def run_monte_carlo_arima_on_race(race, session):
         return
 
     # Get winner probabilities
-    winner_probability_items = get_win_probabilities_from_monte_carlo_matrix(
+    winner_probability_items = get_win_probabilities_from_monte_carlo_speed_figure_matrix(
         race_results,
         entry_id_numbers,
         'arima_stdev_backup'

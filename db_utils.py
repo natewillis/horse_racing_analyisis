@@ -5,7 +5,7 @@ from sqlalchemy.sql import null
 from settings import DATABASE
 from sqlalchemy.ext.declarative import declarative_base
 from models import Races, Horses, Entries, EntryPools, Payoffs, Probables, Tracks, Jockeys, Owners, Trainers, \
-    Picks, BettingResults, Workouts, base, AnalysisProbabilities
+    Picks, BettingResults, Workouts, base, AnalysisProbabilities, PointsOfCall, FractionalTimes, DatabaseStatistics
 from sqlalchemy import func
 
 
@@ -55,6 +55,11 @@ def find_track_instance_from_item(item, session):
         return session.query(Tracks).filter(
             Tracks.name == item['name']
         ).first()
+    elif 'equibase_chart_name' in item:
+        return session.query(Tracks).filter(
+            func.replace(func.replace(Tracks.equibase_chart_name, "'", ''), '&', '') ==
+            func.replace(func.replace(item['equibase_chart_name'], "'", ''), '&', '')
+        ).first()
     else:
         return
 
@@ -94,8 +99,22 @@ def find_trainer_instance_from_item(item, session):
 
 
 def find_horse_instance_from_item(item, session):
-    return session.query(Horses).filter(
-        Horses.horse_name == item['horse_name']
+    if item.get('horse_id', None) is not None:
+        return session.query(Horses).filter(
+            Horses.horse_id == item['horse_id']
+        ).first()
+    elif item.get('horse_name', None) is not None:
+        return session.query(Horses).filter(
+            Horses.horse_name == item['horse_name']
+        ).first()
+    else:
+        return None
+
+
+def find_horse_instance_from_item_and_race(item, race, session):
+    return session.query(Horses).join(Entries).join(Races).filter(
+        Horses.horse_name == item['horse_name'],
+        Races.race_id == race.race_id,
     ).first()
 
 
@@ -172,6 +191,27 @@ def find_betting_result_instance_from_item(item, session):
     ).first()
 
 
+def find_fractional_time_instance_from_item(item, session):
+    return session.query(FractionalTimes).filter(
+        FractionalTimes.race_id == item['race_id'],
+        FractionalTimes.point == item['point'],
+    ).first()
+
+
+def find_point_of_call_instance_from_item(item, session):
+    return session.query(PointsOfCall).filter(
+        PointsOfCall.entry_id == item['entry_id'],
+        PointsOfCall.point == item['point'],
+    ).first()
+
+
+def find_database_statistic_instance_from_item(item, session):
+    return session.query(DatabaseStatistics).filter(
+        DatabaseStatistics.statistic_name == item['statistic_name'],
+        DatabaseStatistics.statistic_date == item['statistic_date'],
+    ).first()
+
+
 def find_instance_from_item(item, item_type, session):
 
     # Instance Finder Dict
@@ -190,6 +230,9 @@ def find_instance_from_item(item, item_type, session):
         'workout': find_workout_instance_from_item,
         'betting_result': find_betting_result_instance_from_item,
         'analysis_probability': find_analysis_probability_instance_from_item,
+        'fractional_time': find_fractional_time_instance_from_item,
+        'point_of_call': find_point_of_call_instance_from_item,
+        'database_statistic': find_database_statistic_instance_from_item,
     }
 
     # Return instance
@@ -213,7 +256,10 @@ def create_new_instance_from_item(item, item_type, session):
         'pick': Picks,
         'workout': Workouts,
         'analysis_probability': AnalysisProbabilities,
-        'betting_result': BettingResults
+        'betting_result': BettingResults,
+        'fractional_time': FractionalTimes,
+        'point_of_call': PointsOfCall,
+        'database_statistic': DatabaseStatistics
     }
 
     # Fix any nulls

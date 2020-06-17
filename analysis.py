@@ -1,11 +1,38 @@
 from models import Races, BettingResults, Entries, EntryPools, Picks, AnalysisProbabilities, Tracks
 from db_utils import get_db_session, shutdown_session_and_engine, load_item_into_database
-from arima import run_monte_carlo_arima_on_race
-from random_forest import run_monte_carlo_random_forest_on_race, train_speed_figure_random_forest
 import argparse
 import datetime
-from joblib import load
-import os
+from probabilities import generate_probabilities
+from random_forest import \
+    generate_single_entry_monte_carlo_speed_figures_from_random_forest_last_four_relative_speed_figures, \
+    train_random_forest_last_four_speed_figures, train_random_forest_last_four_relative_speed_figures, \
+    generate_single_entry_monte_carlo_speed_figures_from_random_forest_last_four_speed_figures, \
+    turn_relative_speed_figures_to_speed_figures
+from arima import generate_single_entry_monte_carlo_speed_figures_from_arima
+
+
+def generate_model_dict_list():
+
+    # Return created list of models
+    return [
+        {
+            'model_type': 'random_forest',
+            'model_name': 'random_forest_last_four_speed_figures',
+            'monte_carlo_speed_figure_function': generate_single_entry_monte_carlo_speed_figures_from_random_forest_last_four_speed_figures,
+            'number_of_speed_figures': 100000,
+            'needs_loading': True,
+            'training_function': train_random_forest_last_four_speed_figures
+        },
+        {
+            'model_type': 'random_forest',
+            'model_name': 'random_forest_last_four_relative_speed_figures',
+            'monte_carlo_speed_figure_function': generate_single_entry_monte_carlo_speed_figures_from_random_forest_last_four_relative_speed_figures,
+            'number_of_speed_figures': 100000,
+            'needs_loading': True,
+            'training_function': train_random_forest_last_four_relative_speed_figures,
+            'speed_figure_model_input_post_processing_function': turn_relative_speed_figures_to_speed_figures
+        },
+    ]
 
 
 def time_frame_definition():
@@ -370,53 +397,6 @@ def evaluate_picks(session):
     session.commit()
 
 
-def run_arima(session):
-
-    # Get races with history
-    races = session.query(Races).filter(
-        Races.equibase_horse_results == True,
-        Races.drf_entries == True
-    ).order_by(Races.card_date.desc()).all()
-
-    # Loop to figure out if analyis is needed
-    for race in races:
-
-        # Check if we have an analysis value
-        analysis_probability = session.query(AnalysisProbabilities).join(Entries).filter(
-            Entries.race_id == race.race_id,
-            AnalysisProbabilities.analysis_type == 'arima_stdev_backup'
-        ).first()
-
-        if analysis_probability is None:
-            run_monte_carlo_arima_on_race(race, session)
-
-
-def run_random_forest(session):
-
-    # Load Model
-    if not os.path.exists('forest_model.joblib'):
-        train_speed_figure_random_forest(session)
-    rf_model = load('forest_model.joblib')
-
-    # Get races with history
-    races = session.query(Races).filter(
-        Races.equibase_horse_results == True,
-        Races.drf_entries == True
-    ).order_by(Races.card_date.desc()).all()
-
-    # Loop to figure out if analyis is needed
-    for race in races:
-
-        # Check if we have an analysis value
-        analysis_probability = session.query(AnalysisProbabilities).join(Entries).filter(
-            Entries.race_id == race.race_id,
-            AnalysisProbabilities.analysis_type == 'random_forest_4_hist'
-        ).first()
-
-        if analysis_probability is None:
-            run_monte_carlo_random_forest_on_race(race, session, rf_model)
-
-
 def bet_on_analysis_probabilities(session):
 
     # Delete Analysis Probability bets
@@ -535,6 +515,16 @@ def pick_strategy_evaluation(session):
         bet_result_item = load_item_into_database(item, 'betting_result', session)
 
 
+def clear_all_probabilities(session):
+
+    # Delete probabilities
+    try:
+        session.query(AnalysisProbabilities).delete()
+        session.commit()
+    except:
+        session.rollback()
+
+
 if __name__ == '__main__':
 
     # Argument Parsing
@@ -581,30 +571,19 @@ if __name__ == '__main__':
         # Close everything out
         shutdown_session_and_engine(db_session)
 
-    if args.mode in ('all', 'run_arima', 'analysis_probabilities'):
+    if args.mode in ('all', 'generate_analysis_probabilities'):
 
         # Mode Tracking
-        modes_run.append('run_arima')
+        modes_run.append('generate_analysis_probabilities')
+
+        # Prep model
+        model_dict_list = generate_model_dict_list()
 
         # Connect to the database
         db_session = get_db_session()
 
         # Evaluate picks
-        run_arima(db_session)
-
-        # Close everything out
-        shutdown_session_and_engine(db_session)
-
-    if args.mode in ('all', 'run_random_forest', 'analysis_probabilities'):
-
-        # Mode Tracking
-        modes_run.append('run_random_forest')
-
-        # Connect to the database
-        db_session = get_db_session()
-
-        # Evaluate picks
-        run_random_forest(db_session)
+        generate_probabilities(db_session, model_dict_list)
 
         # Close everything out
         shutdown_session_and_engine(db_session)
@@ -619,6 +598,20 @@ if __name__ == '__main__':
 
         # Evaluate picks
         bet_on_analysis_probabilities(db_session)
+
+        # Close everything out
+        shutdown_session_and_engine(db_session)
+
+    if args.mode in ('clear_probabilities'):
+
+        # Mode Tracking
+        modes_run.append('clear_probabilities')
+
+        # Connect to the database
+        db_session = get_db_session()
+
+        # Evaluate picks
+        clear_all_probabilities(db_session)
 
         # Close everything out
         shutdown_session_and_engine(db_session)

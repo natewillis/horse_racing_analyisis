@@ -15,6 +15,7 @@ class Tracks(base):
     time_zone = Column('time_zone', String)
     country = Column('country', String)
     rp_track_code = Column('rp_track_code', Integer)
+    equibase_chart_name = Column('equibase_chart_name', String)
 
 
 class Jockeys(base):
@@ -81,6 +82,7 @@ class Races(base):
     min_claim_price = Column('min_claim_price', Float)
     max_claim_price = Column('max_claim_price', Float)
     race_class = Column('race_class', String)
+    weather = Column('weather', String)
 
     # Inferred Data
     off_time = Column('off_time', DateTime)
@@ -91,6 +93,8 @@ class Races(base):
     drf_entries = Column('drf_entries', Boolean, default=False)
     equibase_entries = Column('equibase_entries', Boolean, default=False)
     equibase_horse_results = Column('equibase_horse_results', Boolean, default=False)
+    equibase_chart_scrape = Column('equibase_chart_scrape', Boolean, default=False)
+    equibase_chart_download_date = Column('equibase_chart_download_date', DateTime)
 
     # Scraping Info
     latest_scrape_time = Column('latest_scrape_time', DateTime)  # UTC
@@ -130,6 +134,9 @@ class Entries(base):
     trainer_id = Column('trainer_id', Integer, ForeignKey('trainers.trainer_id'))
     jockey_id = Column('jockey_id', Integer, ForeignKey('jockeys.jockey_id'))
     owner_id = Column('owner_id', Integer, ForeignKey('owners.owner_id'))
+    medication_equipment = Column('medication_equipment', String)
+    comments = Column('comments', String)
+    weight = Column('weight', Float)
 
     # Results
     win_payoff = Column('win_payoff', Float, default=0)
@@ -235,3 +242,35 @@ class AnalysisProbabilities(base):
     analysis_type = Column('analysis_type', String)
     finish_place = Column('finish_place', Integer)
     probability_percentage = Column('probability_percentage', Float)
+
+
+class FractionalTimes(base):
+    __tablename__ = "fractional_times"
+
+    fractional_id = Column('fractional_id', Integer, primary_key=True)
+    race_id = Column('race_id', Integer, ForeignKey('races.race_id'))
+    point = Column('point', Integer)
+    text = Column('text', String)
+    distance = Column('distance', Float)
+    time = Column('time', Float)
+
+
+class PointsOfCall(base):
+    __tablename__ = "points_of_call"
+
+    point_of_call_id = Column('fractional_id', Integer, primary_key=True)
+    entry_id = Column('entry_id', Integer, ForeignKey('entries.entry_id'))
+    point = Column('point', Integer)
+    text = Column('text', String)
+    distance = Column('distance', Float)
+    position = Column('position', Integer)
+    lengths_back = Column('lengths_back', Float)
+
+
+class DatabaseStatistics(base):
+    __tablename__ = "database_statistics"
+
+    database_statistic_id = Column('database_statistic_id', Integer, primary_key=True)
+    statistic_name = Column('statistic_name', String)
+    statistic_value = Column('statistic_value', Float)
+    statistic_date = Column('statistic_date', DateTime)

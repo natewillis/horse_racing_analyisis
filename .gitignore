@@ -144,3 +144,5 @@ settings.py
 
 temp.csv
 *.joblib
+
+models
